@@ -21,8 +21,6 @@ The focus is on **control, calibration, and mechanical design**, not on performa
 This project is intended strictly as a **harmless toy / technical demonstration**.  
 It uses **low‑energy, non‑hazardous components** and is **not designed for autonomous targeting or harmful use**.
 
-If you are looking for anything weapon‑related, this is not it.
-
 ## Hardware
 
 - ESP32‑S3 DevKitC
