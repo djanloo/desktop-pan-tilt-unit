@@ -1,4 +1,4 @@
-# desktop-pan-tilt-unit
+# 3D-printable pan-tilt unit
 
 A fully 3D‑printable, desktop‑scale experimental platform for studying **pointing, calibration, and physical actuation**.
 
