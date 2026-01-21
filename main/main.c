@@ -27,6 +27,9 @@ static TaskHandle_t button_task_handle = NULL;
 
 #define PWM_CHANNEL  LEDC_CHANNEL_0
 #define PWM_GPIO     9
+static float device_pwm_high = 100.0;
+static const float device_pwm_low = 10.0;
+static bool is_device_high = false;
 
 // Motor pins
 static const gpio_num_t mot1 = GPIO_NUM_4;
@@ -59,7 +62,7 @@ const int seq[N_STEPS][4] = {
     {1,0,0,1}
 };
 
-void stepMotor(int step) {
+void step_motor(int step) {
     int _step = step % N_STEPS;
     if(_step < 0) _step += N_STEPS;  // modulo corretto per negativo
 
@@ -69,7 +72,7 @@ void stepMotor(int step) {
     gpio_set_level(mot4, seq[_step][3]);
 }
 
-void motorStop() {
+void motor_stop() {
     gpio_set_level(mot1, 0);
     gpio_set_level(mot2, 0);
     gpio_set_level(mot3, 0);
@@ -154,7 +157,7 @@ void rotate_motor(void *pvParams) {
             cmd = CMD_STOP;
             sign = 0;
             s = 0;
-            motorStop();
+            motor_stop();
         }
 
 
@@ -162,88 +165,17 @@ void rotate_motor(void *pvParams) {
         if (sign != 0) {
             if (s % 500 == 0 ) ESP_LOGI("ROTATE MOTORS", "theta = %lf (sign = %d)", get_theta(), sign);
             for (int i = 0; i < N_STEPS; i++) {
-                stepMotor(sign*i);
+                step_motor(sign*i);
                 theta_steps += sign;
                 s++;
                 esp_rom_delay_us(T_func(s));
             }
         }else if (cmd != CMD_CALIB){
-            motorStop();
+            motor_stop();
         }
         
 
     }
-}
-
-void on_left_button(void){
-    motor_command_t cmd = CMD_LEFT;
-    xQueueOverwrite(motor_cmd_queue, &cmd);
-    set_led_color(0, 10, 0);
-    ESP_LOGI("MAIN", "LEFT button was pressed");
-}
-
-void on_right_button(void){
-    motor_command_t cmd = CMD_RIGHT;
-    xQueueOverwrite(motor_cmd_queue, &cmd);
-    set_led_color(0, 0, 10);
-    ESP_LOGI("MAIN", "RIGHT button was pressed");
-}
-
-void on_middle_button(void){
-    motor_command_t cmd = CMD_STOP;
-    xQueueOverwrite(motor_cmd_queue, &cmd);
-    set_led_color(10, 0, 0);
-    ESP_LOGI("MAIN", "MIDDLE button was pressed");
-}
-
-void on_wheel_move(int wheel){
-
-}
-
-// Stop-range button
-static void IRAM_ATTR button_isr_handler(void *arg)
-{
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xTaskNotifyFromISR(button_task_handle, 0, eNoAction, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken) {
-        portYIELD_FROM_ISR();
-    }
-}
-
-void polar_stop(void *arg)
-{
-    while (1) {
-        // dorme finché NON arriva l'interrupt
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-        motor_command_t cmd = CMD_CALIB;
-        xQueueOverwrite(motor_cmd_queue, &cmd);
-
-        for (int i = 0; i < 100; i++) {
-            stepMotor(-i);        
-            esp_rom_delay_us(T_func(0));
-        }
-
-        printf("Polar stop pressed\n");
-        theta_steps = 0;
-        calibrated = true;
-        vTaskDelay(pdMS_TO_TICKS(200));
-
-        cmd = CMD_STOP;
-        xQueueOverwrite(motor_cmd_queue, &cmd);
-
-    }
-}
-
-void setup_stop_range_button(void)
-{
-    gpio_set_direction(PIN_STOP_RANGE_POLAR, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(PIN_STOP_RANGE_POLAR, GPIO_PULLUP_ONLY);
-
-    gpio_set_intr_type(PIN_STOP_RANGE_POLAR, GPIO_INTR_LOW_LEVEL);
-
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(PIN_STOP_RANGE_POLAR, button_isr_handler, NULL);
 }
 
 void pwm_init(void)
@@ -281,6 +213,88 @@ void pwm_set_duty_percent(float percent)
 }
 
 
+void on_left_button(void){
+    motor_command_t cmd = CMD_LEFT;
+    xQueueOverwrite(motor_cmd_queue, &cmd);
+    set_led_color(0, 10, 0);
+    ESP_LOGI("MAIN", "LEFT button was pressed");
+}
+
+void on_right_button(void){
+    motor_command_t cmd = CMD_RIGHT;
+    xQueueOverwrite(motor_cmd_queue, &cmd);
+    set_led_color(0, 0, 10);
+    ESP_LOGI("MAIN", "RIGHT button was pressed");
+}
+
+void on_middle_button(void){
+    if (is_device_high) pwm_set_duty_percent(device_pwm_low);
+    if (!is_device_high) pwm_set_duty_percent(device_pwm_high);
+    is_device_high = !is_device_high;
+    ESP_LOGI("MAIN", "MIDDLE button was pressed: setting device to %lf", device_pwm_high);
+}
+
+void on_wheel_move(int wheel){
+    device_pwm_high += wheel;
+    if (device_pwm_high > 100){device_pwm_high = 100;}
+    if (device_pwm_high < device_pwm_low) device_pwm_high = device_pwm_low;
+    if (is_device_high){pwm_set_duty_percent(device_pwm_high);}
+    ESP_LOGI("MAIN", "WHEEL: setting device to %lf", device_pwm_high);
+}
+
+void on_release(){
+    motor_command_t cmd = CMD_STOP;
+    xQueueOverwrite(motor_cmd_queue, &cmd);
+    set_led_color(10, 0, 0);
+    ESP_LOGI("MAIN", "mouse released sending stop");
+}
+
+// Stop-range button
+static void IRAM_ATTR button_isr_handler(void *arg)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xTaskNotifyFromISR(button_task_handle, 0, eNoAction, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken) {
+        portYIELD_FROM_ISR();
+    }
+}
+
+void polar_stop(void *arg)
+{
+    while (1) {
+        // dorme finché NON arriva l'interrupt
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        motor_command_t cmd = CMD_CALIB;
+        xQueueOverwrite(motor_cmd_queue, &cmd);
+
+        for (int i = 0; i < 100; i++) {
+            step_motor(-i);        
+            esp_rom_delay_us(T_func(0));
+        }
+
+        printf("Polar stop pressed\n");
+        theta_steps = 0;
+        calibrated = true;
+        vTaskDelay(pdMS_TO_TICKS(200));
+
+        cmd = CMD_STOP;
+        xQueueOverwrite(motor_cmd_queue, &cmd);
+
+    }
+}
+
+void setup_stop_range_button(void)
+{
+    gpio_set_direction(PIN_STOP_RANGE_POLAR, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(PIN_STOP_RANGE_POLAR, GPIO_PULLUP_ONLY);
+
+    gpio_set_intr_type(PIN_STOP_RANGE_POLAR, GPIO_INTR_LOW_LEVEL);
+
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(PIN_STOP_RANGE_POLAR, button_isr_handler, NULL);
+}
+
 void go_home(){
     calibrated = false;
 
@@ -289,7 +303,7 @@ void go_home(){
 
     int s = 0;
     while (!calibrated){
-        stepMotor(s);
+        step_motor(s);
         s++;
         esp_rom_delay_us(T_func(0));
     } 
@@ -301,8 +315,6 @@ void app_main(void) {
     configure_led();
     init_ble();
     pwm_init();
-
-    pwm_set_duty_percent(50);
 
     // Configure stop-range buttons
     xTaskCreate(polar_stop, "polar_stop", 2048, NULL, 10, &button_task_handle);
@@ -324,16 +336,18 @@ void app_main(void) {
     
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    go_home();
+    // go_home();
+
+    pwm_set_duty_percent(20);
 
 
-    while(1){
-        // ESP_LOGI("BUTTON POLL", "lvl = %d", gpio_get_level(PIN_STOP_RANGE_POLAR));
-        // ESP_LOGI("MAIN", "theta_step = %d theta = %lf", theta_steps, get_theta());
-        pwm_set_duty_percent(100);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        pwm_set_duty_percent(10);
-        vTaskDelay(pdMS_TO_TICKS(2000));
+    // while(1){
+    //     // ESP_LOGI("BUTTON POLL", "lvl = %d", gpio_get_level(PIN_STOP_RANGE_POLAR));
+    //     // ESP_LOGI("MAIN", "theta_step = %d theta = %lf", theta_steps, get_theta());
+    //     // pwm_set_duty_percent(100);
+    //     // vTaskDelay(pdMS_TO_TICKS(500));
+    //     pwm_set_duty_percent(10);
+    //     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    }
+    // }
 }

@@ -62,6 +62,9 @@ static void parse_mouse_report(uint8_t *data, uint16_t len) {
                  right ? "[R]" : "",
                  middle ? "[M]" : "",
                  x_move, y_move, wheel);
+    }else{
+        ESP_LOGI(TAG, "Mouse Release");
+        on_release();
     }
     
     static int total_x = 0;
