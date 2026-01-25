@@ -3,8 +3,11 @@
 build/
 sdkconfig*
 !sdkconfig.defaults
-*.FCBak
 managed_components/
+
+# Custom 3D objects to exclude
+*.FCBak
+*3mf
 
 # THIS PART WAS GENERAED
 # Prerequisites
